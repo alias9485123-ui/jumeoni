@@ -19,7 +19,7 @@
   // 1.7.0 콘보 → RP 다리: 엔진의 연결된 채팅은 한 방향이라(RP는 콘보를 읽지 않음) 콘보에서 주고받은 최근 문자를 숨김 메시지에 넣는다.
   //  메시지 탭에서 보낸 · 받은 문자는 바로 넣고(호출 없음), 지금 RP 방의 콘보가 답장을 끝냈을 때 · 창을 열 때 · 탭으로 돌아올 때 ·
   //  채팅 입력칸에 새 메시지를 쓰기 시작할 때만 콘보 최근 메시지 8개를 GET 1번(4초에 1번까지). 바뀐 게 있을 때만 숨김 메시지 · 저장.
-  const VERSION = "1.7.1";
+  const VERSION = "1.7.2";
   const DATA_KEY = "jumeoniV1";
   const POS_KEY = "marinara.jumeoni.fab.v1";
   const PENDING_KEY = "marinara.jumeoni.pending.v1";
@@ -890,19 +890,31 @@
   const bridge = { at: new Map(), seen: new Map(), q: new Map(), later: null, arm: true, armFor: "" };
   onCleanup(() => { if (bridge.later != null) timers.clear(bridge.later); bridge.later = null; });
   /** 콘보 메시지 하나 → 문자 한 줄. 숨김 · 시스템 · 내레이션 · 빈 글은 null. 캐릭터 이름은 기억해 둔 것만(네트워크 없음). */
-  function feedFromMsg(raw, room) {
+  function feedFromMsg(raw, room, convoId) {
     const n = normMsg(raw);
     if (!n.id || n.hidden || (n.role !== "user" && n.role !== "assistant")) return null;
     const d = room.data;
-    let name = "";
-    if (n.role === "user") name = pcWallet(d)?.name || "";
-    else if (n.characterId) {
-      const cached = msg.names.get(n.characterId);
-      name = (cached && cached !== "캐릭터" ? cached : "")
-        || d.wallets.find((w) => w.characterId && w.characterId === n.characterId)?.name
-        || room.people?.chars.find((c) => c.id === n.characterId)?.name || "";
+    let name = "", body = "";
+    if (n.role === "user") { name = pcWallet(d)?.name || ""; body = n.content; } // 내 문자는 예전처럼(줄바꿈은 띄어쓰기로)
+    else {
+      if (n.characterId) {
+        const cached = msg.names.get(n.characterId);
+        name = (cached && cached !== "캐릭터" ? cached : "")
+          || d.wallets.find((w) => w.characterId && w.characterId === n.characterId)?.name
+          || room.people?.chars.find((c) => c.id === n.characterId)?.name || "";
+      }
+      // 메신저와 같은 화자 나누기: 시간 표시 · 아는 이름 머리를 지우고, 다른 화자 묶음만 "이름: "을 붙인다.
+      const known = convoKnown(msgConvo(convoId)?.characterIds, n.characterId);
+      if (name && !known.has(normMatch(name))) known.set(normMatch(name), { name, display: "" });
+      const own = { name, display: msg.alias.get(n.characterId) || "" };
+      const ownKeys = new Set([normMatch(name), normMatch(own.display)].filter(Boolean));
+      const label = (sp) => { const k = known.get(normMatch(sp)); return k ? [k.name, k.display].filter(Boolean).map(normMatch) : [normMatch(sp)]; };
+      body = convoGroups(n.content, own, known).map((g) => {
+        const t = g.lines.map((l) => l.trim()).join(" / ");
+        return !g.speaker || g.own || label(g.speaker).some((k) => ownKeys.has(k)) ? t : `${g.speaker}: ${t}`;
+      }).join(" / ");
     }
-    return normFeed({ id: n.id, who: n.role === "user" ? "user" : "char", name, text: n.content, ts: tms(n.createdAt) || Date.now() });
+    return normFeed({ id: n.id, who: n.role === "user" ? "user" : "char", name, text: body, ts: tms(n.createdAt) || Date.now() });
   }
   /** 같은 id는 하나로(새 값으로, 이름을 모르면 예전 이름 유지) · 3일 지난 줄 버림 · 시간 순서로 마지막 FEED_MAX줄. 바뀌었으면 true. */
   function mergeFeed(d, items, now = Date.now()) {
@@ -928,7 +940,7 @@
   function bridgePush(rpId, convoId, raw) {
     const room = state.rooms.get(rpId);
     if (!room || !bridgeOn(room) || bridgeConvo(room) !== convoId) return;
-    feedApply(room, [feedFromMsg(raw, room)], false);
+    feedApply(room, [feedFromMsg(raw, room, convoId)], false);
   }
   /** 한 방에 한 번에 하나씩. */
   function bridgeRun(chatId, reason) {
@@ -973,7 +985,7 @@
     let last = "";
     for (const m of list) if (tms(m.createdAt) > tms(last)) last = String(m.createdAt);
     bridge.seen.set(chatId, { convoId, at: Date.now(), last });
-    return feedApply(room, list.map((m) => feedFromMsg(m, room)), true);
+    return feedApply(room, list.map((m) => feedFromMsg(m, room, convoId)), true);
   }
 
   // ── 세계관 자료 모으기 (누를 때만) ──
@@ -1746,7 +1758,7 @@
   const msg = {
     convos: null, rpRows: null, listBusy: false, listPromise: null, listErr: "", listStale: false, listAt: 0,
     forRp: "", selId: "", picking: false, showOthers: false, confirmConnect: false, connectBusy: false, fresh: false,
-    thread: null, names: new Map(), nameReq: new Set(),
+    thread: null, names: new Map(), alias: new Map(), nameReq: new Set(),
     send: null, fail: null, note: null, unread: new Map(), anchor: null,
   };
   const isConvo = (c) => String(c?.mode || "").toLowerCase() === "conversation";
@@ -1774,6 +1786,141 @@
     };
   }
   const shownMsg = (m) => !m.hidden && (m.role === "user" || m.role === "assistant" || m.role === "narrator");
+
+  // ── 콘보 화자 나누기 (1.7.2): 엔진 shared/utils/speaker-segments.ts · ConversationView.tsx 와 같은 규칙 ──
+  // 엔진 text-matching.ts normalizeTextForMatch
+  const normMatch = (v) => (typeof v === "string" ? v.normalize("NFKC").trim().toLocaleLowerCase().replace(/\s+/gu, " ") : "");
+  const CLOCK_SRC = String.raw`\d{1,2}[:.]\d{2}(?:\s*(?:am|pm))?`;
+  const FULLDATE_SRC = String.raw`\d{1,2}\.\d{1,2}\.\d{2,4}`;
+  const DATETIME_SRC = String.raw`\d{1,2}\.\d{1,2}(?:\.\d{2,4})?\s+${CLOCK_SRC}`;
+  const LEAD_TS_RE = new RegExp(String.raw`^([^\S\n]*(?:\[(?:${DATETIME_SRC}|${CLOCK_SRC}|${FULLDATE_SRC})\])\s*)+`, "gm");
+  /** 줄 머리의 [HH:MM] · [DD.MM.YYYY] · [DD.MM HH:MM] 를 지운다(엔진 stripLeadingMessageTimestamps). */
+  const stripTs = (s) => String(s || "").replace(LEAD_TS_RE, "").trim();
+  function angleEnd(v, i, less) {
+    const named = less ? "&lt;" : "&gt;";
+    if (v.slice(i, i + named.length).toLowerCase() === named) return i + named.length;
+    if (!v.startsWith("&#", i)) return -1;
+    let c = i + 2;
+    const hex = v[c]?.toLowerCase() === "x";
+    if (hex) c++;
+    while (v[c] === "0") c++;
+    const suf = hex ? (less ? "3c;" : "3e;") : less ? "60;" : "62;";
+    return v.slice(c, c + suf.length).toLowerCase() === suf ? c + suf.length : -1;
+  }
+  /** &lt;speaker="…"&gt; 처럼 글자로 바뀐 화자 태그를 되돌린다(엔진 decodeEncodedSpeakerTags). */
+  function decodeSpeakerTags(v) {
+    let out = "", cur = 0, cand = -1, body = -1;
+    for (let i = 0; i < v.length; i++) {
+      if (cand < 0) {
+        const e = angleEnd(v, i, true);
+        if (e < 0) continue;
+        cand = i; body = e; i = e - 1;
+        continue;
+      }
+      if (v[i] === "<" || v[i] === ">") { cand = -1; body = -1; continue; }
+      const ce = angleEnd(v, i, false);
+      if (ce < 0) continue;
+      const dec = v.slice(body, i).replace(/&quot;|&#0*34;|&#x0*22;/gi, '"').replace(/&apos;|&#0*39;|&#x0*27;/gi, "'").trim();
+      let rep = null;
+      if (/^\/\s*speaker\s*$/i.test(dec)) rep = "</speaker>";
+      else { const o = dec.match(/^speaker\s*=\s*(["'])([^"']*)\1\s*$/i); if (o?.[2]) rep = `<speaker="${o[2].trim()}">`; }
+      if (rep !== null) { out += v.slice(cur, cand) + rep; cur = ce; }
+      cand = -1; body = -1; i = ce - 1;
+    }
+    return out + v.slice(cur);
+  }
+  /** <speaker="이름">…</speaker> 조각들. 태그가 하나도 없으면 null. 모르는 이름은 내레이션(null). */
+  function speakerTagSegs(content, known) {
+    const v = decodeSpeakerTags(content);
+    const open = '<speaker="', close = "</speaker>";
+    const segs = [];
+    let last = 0, from = 0, found = false;
+    while (from < v.length) {
+      const s = v.indexOf(open, from);
+      if (s < 0) break;
+      const ns = s + open.length, ne = v.indexOf('"', ns);
+      if (ne < 0 || v[ne + 1] !== ">") { from = s + 1; continue; }
+      const be = v.indexOf(close, ne + 2);
+      if (be < 0) break;
+      found = true;
+      const who = v.slice(ns, ne).trim();
+      if (s > last) { const before = v.slice(last, s).trim(); if (before) segs.push({ speaker: null, text: before }); }
+      segs.push({ speaker: known.has(normMatch(who)) ? who : null, text: v.slice(ne + 2, be).trim() });
+      last = be + close.length; from = last;
+    }
+    if (last < v.length) { const after = v.slice(last).trim(); if (after) segs.push({ speaker: null, text: after }); }
+    return found ? segs : null;
+  }
+  /** `이름: 글` · `이름:\n글` 줄 머리 조각들(엔진 parseNamePrefixFormat). 아는 이름이 하나도 없으면 null. */
+  function namePrefixSegs(content, known, lead) {
+    if (!known.size) return null;
+    const segs = [];
+    let who = null, cur = [], found = false;
+    const flush = () => { if (cur.length) segs.push({ speaker: who, text: cur.join("\n") }); };
+    for (const line of content.split("\n")) {
+      const ci = line.indexOf(":");
+      if (ci > 0) {
+        const name = line.slice(0, ci).trim();
+        const raw = line.slice(ci + 1);
+        const same = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
+        if ((same.length === 0 || /^[\t ]/u.test(same)) && known.has(normMatch(name))) {
+          flush();
+          who = name; cur = [same.replace(/^[\t ]+/u, "")]; found = true;
+          continue;
+        }
+      }
+      cur.push(line);
+    }
+    flush();
+    if (!found) return null;
+    const vis = segs.filter((s) => s.text.trim());
+    const nl = lead ? normMatch(lead) : "";
+    if (vis[0]?.speaker === null && nl && known.has(nl)) vis[0] = { ...vis[0], speaker: lead.trim() };
+    return vis;
+  }
+  /** 같은 화자가 이어지면 한 묶음으로(엔진 groupConsecutiveSegments) · 묶음마다 빈 줄 뺀 줄들(splitGroupedSegmentDisplayLines). */
+  function groupSegs(segs) {
+    const groups = [];
+    for (const s of segs) {
+      const last = groups[groups.length - 1];
+      const t = s.text.replace(/^\n+/, "").replace(/\n+$/, "");
+      if (last && last.speaker && s.speaker && normMatch(last.speaker) === normMatch(s.speaker)) last.chunks.push(t);
+      else groups.push({ speaker: s.speaker, chunks: [t] });
+    }
+    return groups.map((g) => ({ speaker: g.speaker, lines: g.chunks.flatMap((c) => c.split(/\r?\n/)).filter((l) => l.trim().length > 0) }));
+  }
+  const nonBlank = (s) => String(s || "").split(/\r?\n/).filter((l) => l.trim().length > 0);
+  /** 콘보 방 캐릭터들(+ 이 메시지의 캐릭터)의 이름 · 콘보 표시 이름 → { name, display }. 기억해 둔 것만(네트워크 없음). */
+  function convoKnown(ids, ownId) {
+    const out = new Map();
+    for (const id of Array.from(new Set([...arr(ids), ...(ownId ? [ownId] : [])]))) {
+      const nm = msg.names.get(id);
+      const name = nm && nm !== "캐릭터" ? nm : "";
+      const display = msg.alias.get(id) || "";
+      for (const a of [name, display]) {
+        if (!a.trim()) continue;
+        const k = normMatch(a);
+        if (id === ownId || !out.has(k)) out.set(k, { name, display });
+      }
+    }
+    return out;
+  }
+  /**
+   * 메시지 하나 → 화자 묶음 [{ speaker: 이름 | null(내레이션), lines }]. 엔진 콘보 화면과 같은 순서:
+   * 시간 표시 지우기 → 맨 앞 "이름:" 줄 지우기 → 화자 태그 → "이름: " 줄 머리 → 둘 다 없으면 빈 줄 · 이름만 있는 줄을 뺀 한 묶음.
+   */
+  function convoGroups(content, own, known) {
+    let c = stripTs(content);
+    const ownName = own?.name || "";
+    if (ownName) c = c.replace(new RegExp(`^\\s*${ownName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*:?\\s*\\n`, "i"), "");
+    const keys = new Set(known.keys());
+    const lead = (own?.display || "").trim() || ownName || null;
+    const segs = speakerTagSegs(c, keys) || namePrefixSegs(c, keys, lead);
+    const label = (sp) => { const k = known.get(normMatch(sp)); return (k && (k.display.trim() || k.name)) || sp; };
+    if (segs) return groupSegs(segs).filter((g) => g.lines.length).map((g) => ({ speaker: g.speaker ? label(g.speaker) : null, lines: g.lines }));
+    const lines = nonBlank(c).filter((l) => !ownName || (l.trim() !== ownName && l.trim() !== `${ownName}:`));
+    return lines.length ? [{ speaker: (own?.display || "").trim() || ownName || null, lines, own: true }] : [];
+  }
 
   /** GET /api/chats 1번. 콘보 방 목록과 RP 방 연결 정보를 기억하고 안 읽음 수를 다시 센다. */
   function msgLoadList() {
@@ -1841,7 +1988,14 @@
     if (!ids.length) return;
     for (const id of ids.slice(0, CAP.wallets)) {
       msg.nameReq.add(id);
-      try { msg.names.set(id, cardOf(await api(`characters/${enc(id)}`)).name || "캐릭터"); }
+      try {
+        const row = await api(`characters/${enc(id)}`);
+        msg.names.set(id, cardOf(row).name || "캐릭터");
+        // 콘보 전용 표시 이름: 캐릭터 data.extensions.convoDisplayName (엔진 ChatArea.tsx toCharacterMapValue)
+        const c = parseRecord(row?.data), ext = parseRecord(c.extensions), inner = parseRecord(parseRecord(c.data).extensions);
+        const dn = str(typeof ext.convoDisplayName === "string" ? ext.convoDisplayName : inner.convoDisplayName, 40);
+        if (dn) msg.alias.set(id, dn);
+      }
       catch { msg.names.set(id, "캐릭터"); }
     }
     msgPaint();
@@ -2231,13 +2385,26 @@
     let prevKey = "";
     for (const m of shown) {
       const me = m.role === "user";
-      const key = me ? "me" : `${m.role}:${m.characterId}`;
-      const name = me ? "" : m.role === "narrator" ? "내레이션" : msg.names.get(m.characterId) || "캐릭터";
-      el.append(rowIn(h("div", { class: `jmn-bub-row ${me ? "jmn-me" : "jmn-them"}`, "data-failed": m.failed ? "1" : null, "data-pending": m.sending ? "1" : null },
-        !me && key !== prevKey ? h("span", { class: "jmn-bub-name", text: name }) : null,
-        h("div", { class: "jmn-bub", text: m.content || (m.attach ? "(첨부)" : "") }),
-        h("span", { class: "jmn-bub-time", text: m.failed ? "보내지 못했어요" : m.sending && m.local ? "보내는 중…" : fmtTime(m.createdAt) })), rowKey, m.id));
-      prevKey = key;
+      // 화자 묶음마다 한 줄(이름표 + 줄마다 말풍선). 캐릭터 글은 엔진 콘보 화면과 같은 규칙으로 나눈다.
+      let groups;
+      if (m.role === "assistant") {
+        const known = convoKnown(cur.characterIds, m.characterId);
+        const nm = msg.names.get(m.characterId);
+        groups = convoGroups(m.content, { name: nm && nm !== "캐릭터" ? nm : "", display: msg.alias.get(m.characterId) || "" }, known);
+      } else groups = [{ speaker: me ? "" : "내레이션", lines: nonBlank(m.content), own: true }];
+      if (!groups.length || !groups.some((g) => g.lines.length)) groups = [{ speaker: groups[0]?.speaker ?? "", lines: [m.attach ? "(첨부)" : ""], own: true }];
+      const time = m.failed ? "보내지 못했어요" : m.sending && m.local ? "보내는 중…" : fmtTime(m.createdAt);
+      groups.forEach((g, gi) => {
+        const narr = !me && !g.speaker && !g.own;
+        const name = me ? "" : g.speaker || "캐릭터";
+        const key = me ? "me" : narr ? "" : m.role === "narrator" ? "narrator" : `s:${normMatch(name)}`;
+        const tail = gi === groups.length - 1 ? h("span", { class: "jmn-bub-time", text: time }) : null;
+        el.append(rowIn(h("div", { class: `jmn-bub-row ${me ? "jmn-me" : "jmn-them"}${narr ? " jmn-narr" : ""}`, "data-failed": m.failed ? "1" : null, "data-pending": m.sending ? "1" : null },
+          !me && !narr && key !== prevKey ? h("span", { class: "jmn-bub-name", text: name }) : null,
+          ...g.lines.map((l) => h(narr ? "p" : "div", { class: narr ? "jmn-bub-narr" : "jmn-bub", text: l })),
+          tail), rowKey, m.id));
+        prevKey = key;
+      });
     }
     // 답장을 기다리는 동안: 세 점이 통통 튄다(글로 된 상태는 아래 상태 줄이 알려 준다).
     const s = msg.send && msg.send.chatId === cur.id ? msg.send : null;

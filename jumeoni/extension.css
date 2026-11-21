@@ -356,6 +356,10 @@
 #jmn-root-v1 .jmn-them .jmn-bub { background: var(--jm-raise); border: 1px solid var(--jm-line); border-radius: 16px 16px 16px 4px; }
 #jmn-root-v1 .jmn-bub-name { font-size: 11.5px; font-weight: 600; color: var(--jm-muted); padding: 0 4px; overflow-wrap: anywhere; }
 #jmn-root-v1 .jmn-bub-time { font-family: var(--jm-mono); font-size: 10.5px; color: var(--jm-muted); padding: 0 4px; }
+#jmn-root-v1 .jmn-me .jmn-bub + .jmn-bub { border-top-right-radius: 4px; }
+#jmn-root-v1 .jmn-them .jmn-bub + .jmn-bub { border-top-left-radius: 4px; }
+#jmn-root-v1 .jmn-bub-row.jmn-narr { max-width: 92%; }
+#jmn-root-v1 .jmn-bub-narr { margin: 0; padding: 2px 4px; font-style: italic; font-size: 12.5px; line-height: 1.55; color: var(--jm-muted); white-space: pre-wrap; overflow-wrap: anywhere; }
 #jmn-root-v1 .jmn-bub-row[data-pending] .jmn-bub { opacity: .7; }
 #jmn-root-v1 .jmn-bub-row[data-failed] .jmn-bub { opacity: .55; border: 1.5px dashed var(--jm-inkfg); }
 #jmn-root-v1 .jmn-bub-row[data-failed] .jmn-bub-time { color: var(--jm-fg); font-weight: 600; }
