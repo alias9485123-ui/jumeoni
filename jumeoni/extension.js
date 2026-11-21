@@ -19,7 +19,7 @@
   // 1.7.0 콘보 → RP 다리: 엔진의 연결된 채팅은 한 방향이라(RP는 콘보를 읽지 않음) 콘보에서 주고받은 최근 문자를 숨김 메시지에 넣는다.
   //  메시지 탭에서 보낸 · 받은 문자는 바로 넣고(호출 없음), 지금 RP 방의 콘보가 답장을 끝냈을 때 · 창을 열 때 · 탭으로 돌아올 때 ·
   //  채팅 입력칸에 새 메시지를 쓰기 시작할 때만 콘보 최근 메시지 8개를 GET 1번(4초에 1번까지). 바뀐 게 있을 때만 숨김 메시지 · 저장.
-  const VERSION = "1.7.2";
+  const VERSION = "1.7.3";
   const DATA_KEY = "jumeoniV1";
   const POS_KEY = "marinara.jumeoni.fab.v1";
   const PENDING_KEY = "marinara.jumeoni.pending.v1";
@@ -247,6 +247,8 @@
     if (isRecord(e?.src)) out.src = { messageId: str(e.src.messageId, 256), swipe: Math.max(0, Math.round(Number(e.src.swipe) || 0)) };
     const g = str(e?.g, 40);
     if (g) out.g = g;
+    const rp = str(e?.rp, 40);
+    if (rp) out.rp = rp;
     return out;
   }
   /** 재고: 0~999 정수, null = 무제한. 비었거나 못 읽으면 def. */
@@ -309,6 +311,7 @@
     delete pc.characterId;
     d.wallets = [pc, ...wallets.filter((w) => w.who === "npc").slice(0, CAP.wallets - 1)];
     d.stat = num(r.stat);
+    d.rpTime = str(r.rpTime, 40);
     d.ledger = arr(r.ledger).map(normLedger).filter((e) => e.title).slice(0, CAP.ledger);
     d.bag = arr(r.bag).map((b) => ({ id: str(b?.id, 40) || uid(), name: str(b?.name, 60), qty: num(b?.qty) })).filter((b) => b.name && b.qty > 0).slice(0, CAP.bag);
     d.quests = arr(r.quests).map((q) => normQuest(q)).filter((q) => q.title).slice(0, CAP.quests);
@@ -340,8 +343,23 @@
     if (q.rewardStat > 0 && d.pack.statName) parts.push(`${d.pack.statName} ${fmt(q.rewardStat)}`);
     return parts.length ? `보상 ${parts.join(" · ")}` : "";
   }
+  /** 시공간 카드 태그 "§RP | 26-11-07 (토) | 21:30 | 장소 | 날씨§"에서 작중 날짜 · 시각을 읽는다. 없으면 null. */
+  function readRpTime(text) {
+    const m = /§\s*RP\s*\|([^|§\n]{1,40})\|\s*(\d{1,2})\s*:\s*(\d{2})/i.exec(String(text || ""));
+    if (!m) return null;
+    const raw = m[1].trim();
+    let mo = 0, da = 0;
+    const a = /(\d{2,4})\s*[.\-/년]\s*(\d{1,2})\s*[.\-/월]\s*(\d{1,2})/.exec(raw);
+    const b = /\b(\d{2})(\d{2})(\d{2})\b/.exec(raw);
+    if (a) { mo = Number(a[2]); da = Number(a[3]); } else if (b) { mo = Number(b[2]); da = Number(b[3]); }
+    const hh = Number(m[2]), mm = Number(m[3]);
+    if (!(mo >= 1 && mo <= 12 && da >= 1 && da <= 31 && hh <= 23 && mm <= 59)) return null;
+    const wd = /\(([월화수목금토일])\)/.exec(raw);
+    return `${pad(mo)}/${pad(da)}${wd ? ` (${wd[1]})` : ""} ${pad(hh)}:${pad(mm)}`;
+  }
   function addLedger(d, entry) {
     const e = { id: uid(), ts: Date.now(), title: str(entry.title, 100), sub: str(entry.sub, 100), amount: signedNum(entry.amount), walletId: entry.walletId, k: entry.k || "" };
+    if (d.rpTime) e.rp = str(d.rpTime, 40);
     if (entry.src) e.src = { messageId: str(entry.src.messageId, 256), swipe: Number(entry.src.swipe) || 0 };
     if (entry.g) e.g = entry.g;
     d.ledger.unshift(e);
@@ -787,6 +805,12 @@
     const plan = planReplies(d, list);
     d.prBase = false;
     let changed = false, count = 0;
+    // 작중 시각: 최근 답장 중 시공간 카드 태그가 있는 가장 나중 것 (서버 호출 없이, 이미 읽은 메시지에서)
+    for (const m of arr(list)) {
+      if (!isRecord(m) || m.role !== "assistant") continue;
+      const t = readRpTime(m.content);
+      if (t && t !== d.rpTime) { d.rpTime = t; changed = true; }
+    }
     const arrived = [], notes = [];
     for (const c of plan) {
       const wq = watchQuests(room), wm = watchMoney(room);
@@ -2944,7 +2968,7 @@
     for (const e of list.slice(0, 60)) {
       const mine = e.walletId === pc.id;
       const owner = mine ? "" : (d.wallets.find((w) => w.id === e.walletId)?.name || "NPC");
-      right.append(rowIn(row(e.title, [e.sub, owner ? `${owner} 통장` : "", fmtTime(e.ts)].filter(Boolean).join(" · "),
+      right.append(rowIn(row(e.title, [e.sub, owner ? `${owner} 통장` : "", e.rp ? `작중 ${e.rp}` : fmtTime(e.ts)].filter(Boolean).join(" · "),
         numEl(signed(e.amount), !mine ? "jmn-mute" : e.amount > 0 ? "jmn-plus" : e.amount < 0 ? "jmn-minus" : ""),
         e.k === "auto" ? h("button", { class: "jmn-btn jmn-ghost jmn-undo", type: "button", text: "되돌리기", "aria-label": `${e.title} 자동 반영 되돌리기`, onclick: () => undoAuto(room, e) }) : null), rk, e.id));
     }
