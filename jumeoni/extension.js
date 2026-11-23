@@ -19,7 +19,7 @@
   // 1.7.0 콘보 → RP 다리: 엔진의 연결된 채팅은 한 방향이라(RP는 콘보를 읽지 않음) 콘보에서 주고받은 최근 문자를 숨김 메시지에 넣는다.
   //  메시지 탭에서 보낸 · 받은 문자는 바로 넣고(호출 없음), 지금 RP 방의 콘보가 답장을 끝냈을 때 · 창을 열 때 · 탭으로 돌아올 때 ·
   //  채팅 입력칸에 새 메시지를 쓰기 시작할 때만 콘보 최근 메시지 8개를 GET 1번(4초에 1번까지). 바뀐 게 있을 때만 숨김 메시지 · 저장.
-  const VERSION = "1.7.3";
+  const VERSION = "1.7.4";
   const DATA_KEY = "jumeoniV1";
   const POS_KEY = "marinara.jumeoni.fab.v1";
   const PENDING_KEY = "marinara.jumeoni.pending.v1";
@@ -218,7 +218,7 @@
       v: 1, ownerChatId: chatId, pack: { currency: "골드", statName: "", shops: [] },
       wallets: [{ id: uid(), who: "pc", name: "나", balance: 0 }], stat: 0, ledger: [], bag: [], quests: [], deliveries: [],
       send: true, autoMoney: true, processedReplies: [], prBase: false, usedNote: "", contextMessageId: "", contextText: "",
-      convoBridge: true, convoFeed: [],
+      convoBridge: true, convoFeed: [], ledgerShare: 5,
     };
   }
   /** 콘보 문자 한 줄 { id, who, name, text, ts }. 못 쓰는 줄은 null. */
@@ -330,6 +330,7 @@
     d.contextText = text(r.contextText, 4000);
     // 1.7.0: 콘보 다리(없던 데이터는 켜짐 · 빈 목록).
     d.convoBridge = r.convoBridge !== false;
+    d.ledgerShare = [0, 5, 10, 20].includes(Number(r.ledgerShare)) ? Number(r.ledgerShare) : 5;
     d.convoFeed = arr(r.convoFeed).map(normFeed).filter(Boolean).slice(-FEED_MAX);
     return d;
   }
@@ -403,8 +404,19 @@
       L.push(x.stage === 2 ? `주문한 ${deliveryLabel(x)}이(가) 조리를 마치고 이번 장면에서 도착한다.` : `방금 ${deliveryLabel(x)}을(를) 주문했다. 아직 도착하지 않았다.`);
     }
     if (d.usedNote) L.push(d.usedNote);
-    const recent = d.ledger.filter((e) => e.k === "buy" || e.k === "xfer").slice(0, 2);
-    if (recent.length) L.push(`최근 거래: ${recent.map((e) => `${e.title} ${signed(e.amount)}`).join(" / ")}`);
+    const share = d.ledgerShare || 0;
+    if (share > 0 && d.ledger.length) {
+      // 통장 내역 최근 N건 (오래된 것부터). 작중 시각이 있으면 그걸, 없으면 현실 날짜.
+      const rows = d.ledger.slice(0, share).reverse().map((e) => {
+        const who = d.wallets.find((w) => w.id === e.walletId)?.name || "";
+        const when = e.rp ? `작중 ${e.rp}` : fmtTime(e.ts);
+        return `${when} · ${who ? `${who} ` : ""}${e.title} ${signed(e.amount)}`;
+      });
+      L.push(`[통장 내역 — 최근 ${rows.length}건]`, ...rows);
+    } else {
+      const recent = d.ledger.filter((e) => e.k === "buy" || e.k === "xfer").slice(0, 2);
+      if (recent.length) L.push(`최근 거래: ${recent.map((e) => `${e.title} ${signed(e.amount)}`).join(" / ")}`);
+    }
     const convo = d.convoBridge ? convoBlock(d) : "";
     if (convo) L.push(convo);
     return L.join("\n");
@@ -3295,6 +3307,10 @@
       switchRow("send", "RP에 전달", "지갑 · 가방 · 임무 · 배달 상태를 숨김 메시지로 알려 줘요", d.send, flipSend),
       switchRow("money", "RP 속 돈 흐름 자동 반영", "답장 끝의 [송금] · [입금] · [출금] 표시를 바로 반영해요", d.autoMoney, flipMoney),
       switchRow("bridge", "콘보 대화를 RP에 알려주기", "연결된 콘보에서 주고받은 최근 문자를 다음 RP 답장에 참고로 전달해요.", d.convoBridge, flipBridge),
+      h("div", { class: "jmn-swrow" },
+        h("div", { class: "jmn-row-main" }, h("span", { class: "jmn-row-title", text: "통장 내역을 RP에 알려주기" }), h("small", { text: "최근 몇 건을 숨김 메시지로 전달할지 골라요. 10건이면 답장마다 약 200토큰 늘어요" })),
+        savedEl("ledger"),
+        segPill("ledger", ["끔", "5건", "10건", "20건"], Math.max(0, [0, 5, 10, 20].indexOf(d.ledgerShare || 0)), (i) => { const n = [0, 5, 10, 20][i]; markSaved("ledger"); edit(room, (x) => { x.ledgerShare = n; }, n ? `통장 내역 최근 ${n}건을 RP에 전달해요.` : "통장 내역은 최근 거래 1~2건만 전달해요."); }, { label: "통장 내역 건수", nav: true })),
       h("div", { class: "jmn-swrow" },
         h("div", { class: "jmn-row-main" }, h("span", { class: "jmn-row-title", text: "화면 색" }), h("small", { text: "이 브라우저의 모든 방에 똑같이 적용돼요" })),
         savedEl("tone"),
