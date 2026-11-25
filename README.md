@@ -3,7 +3,7 @@
 [Marinara Engine](https://github.com/Pasta-Devs/Marinara-Engine)용 개인 확장(Personal Extension)이에요.
 RP 방마다 **지갑 · 상점과 배달 · 가방 · 퀘스트 · 페르소나 비밀 · 메시지(콘보)** 를 따로 두는 단말기 창을 띄우고, 지금 상태를 `{{char}}`에게 숨김 메시지로 알려 줘요.
 
-- 버전: 1.7.4
+- 버전: 1.8.0
 - 확인한 엔진 버전: Marinara Engine 2.5.2
 
 ## 설치

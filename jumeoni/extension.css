@@ -517,3 +517,69 @@
 #jmn-root-v1 .jmn-bal { container-type: inline-size; }
 #jmn-root-v1 .jmn-bal b { white-space: nowrap; overflow-wrap: normal; font-size: clamp(15px, calc(100cqi / (var(--jm-n, 6) * .64)), 28px); }
 #jmn-root-v1 .jmn-wallet .jmn-bal-pc b { font-size: clamp(15px, calc(100cqi / (var(--jm-n, 6) * .64)), 32px); }
+
+/* ── 1.8.0 거래하기 펼침 메뉴 · 내역 액정 숫자 ──────────────────────
+   버튼 하나를 누르면 목록이 부드럽게 펼쳐지고, 고르면 접히면서 폼이 열려요.
+   내역 금액은 작은 액정 창 안에서 빛나고, ▲(들어옴) ▼(나감)로 방향을 보여 줘요. */
+#jmn-root-v1 .jmn-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+/* 접었다 펴는 칸 */
+#jmn-root-v1 .jmn-fold { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .4s var(--jm-ease), margin-top .4s var(--jm-ease); }
+#jmn-root-v1 .jmn-fold.jmn-on { grid-template-rows: 1fr; }
+#jmn-root-v1 .jmn-fold-in { overflow: hidden; min-height: 0; }
+#jmn-root-v1 .jmn-fold:not(.jmn-on) { visibility: hidden; transition: grid-template-rows .4s var(--jm-ease), visibility 0s .4s; }
+#jmn-root-v1 .jmn-wfold-form.jmn-on { transition-delay: .12s; }
+
+/* 거래하기 버튼 */
+#jmn-root-v1 .jmn-wact { display: flex; flex-direction: column; gap: 6px; }
+#jmn-root-v1 .jmn-wtrig {
+  width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  min-height: 46px; padding: 10px 16px; border-radius: 14px; cursor: pointer;
+  color: var(--jm-fg); font-size: 14px; font-weight: 600;
+  background: var(--jm-glass); border: 1px solid var(--jm-glass-bd);
+  box-shadow: inset 0 .5px 0 var(--jm-glass-top);
+  transition: background .25s ease, border-color .25s ease, transform .12s ease;
+}
+#jmn-root-v1 .jmn-wtrig:hover:not(:disabled) { background: var(--jm-soft); }
+#jmn-root-v1 .jmn-wtrig:active:not(:disabled) { transform: scale(.98); }
+#jmn-root-v1 .jmn-wtrig:disabled { opacity: .5; cursor: default; }
+#jmn-root-v1 .jmn-wtrig.jmn-on { border-color: var(--jm-teal); }
+#jmn-root-v1 .jmn-wtrig-l { display: inline-flex; align-items: center; gap: 10px; }
+#jmn-root-v1 .jmn-wtrig-ic { font-style: normal; font-size: 16px; color: var(--jm-teal); width: 18px; text-align: center; }
+#jmn-root-v1 .jmn-wtrig-chev { font-style: normal; color: var(--jm-muted); transition: transform .35s var(--jm-ease), color .25s ease; }
+#jmn-root-v1 .jmn-wtrig[aria-expanded="true"] .jmn-wtrig-chev { transform: rotate(180deg); color: var(--jm-teal); }
+
+/* 펼쳐지는 목록 */
+#jmn-root-v1 .jmn-wlist { border-radius: 16px; padding: 6px; display: flex; flex-direction: column; gap: 2px; }
+#jmn-root-v1 .jmn-witem {
+  width: 100%; display: flex; align-items: center; gap: 12px; padding: 9px 10px; border: 0; border-radius: 12px;
+  background: transparent; color: var(--jm-fg); text-align: left; cursor: pointer; font-size: 14px; font-weight: 600;
+  opacity: 0; transform: translateY(-6px);
+  transition: opacity .3s ease, transform .35s var(--jm-ease), background .2s ease;
+}
+#jmn-root-v1 .jmn-fold.jmn-on .jmn-witem { opacity: 1; transform: none; transition-delay: calc(60ms + var(--i, 0) * 45ms), calc(60ms + var(--i, 0) * 45ms), 0s; }
+#jmn-root-v1 .jmn-witem:hover:not(:disabled) { background: var(--jm-soft); }
+#jmn-root-v1 .jmn-fold.jmn-on .jmn-witem:disabled { opacity: .45; cursor: default; }
+#jmn-root-v1 .jmn-witem-ic {
+  flex: none; width: 34px; height: 34px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--jm-glass-bd); font-size: 16px; color: var(--jm-teal); font-family: var(--jm-mono);
+}
+#jmn-root-v1 .jmn-witem-t { min-width: 0; display: flex; flex-direction: column; }
+#jmn-root-v1 .jmn-witem-t small { color: var(--jm-muted); font-size: 12px; font-weight: 400; }
+#jmn-root-v1 .jmn-wfold-form .jmn-form { margin-top: 0; }
+
+/* 내역 액정 숫자 */
+#jmn-root-v1 .jmn-ledger .jmn-lcd {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 16px; font-variant-numeric: tabular-nums slashed-zero; letter-spacing: -.01em;
+  padding: 2px 9px 2px 7px; border-radius: 2px;
+  background: rgba(0, 0, 0, .35); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .08);
+  text-shadow: 0 0 6px color-mix(in srgb, currentColor 45%, transparent);
+}
+#jmn-root-v1 .jmn-lcd-arrow { font-style: normal; font-size: 10px; line-height: 1; }
+#jmn-root-v1 .jmn-lcd-v { position: relative; }
+#jmn-root-v1 .jmn-lcd-v::before { content: attr(data-g); position: absolute; right: 0; top: 0; color: rgba(255, 255, 255, .07); text-shadow: none; pointer-events: none; }
+#jmn-root-v1 .jmn-lcd-v > span { position: relative; }
+#jmn-root-v1 .jmn-ledger .jmn-lcd.jmn-mute { text-shadow: none; }
+#jmn-root-v1[data-tone="paper"] .jmn-ledger .jmn-lcd { background: rgba(0, 0, 0, .05); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .08); text-shadow: none; }
+#jmn-root-v1[data-tone="paper"] .jmn-lcd-v::before { color: rgba(0, 0, 0, .06); }

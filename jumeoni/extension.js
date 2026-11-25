@@ -19,7 +19,7 @@
   // 1.7.0 콘보 → RP 다리: 엔진의 연결된 채팅은 한 방향이라(RP는 콘보를 읽지 않음) 콘보에서 주고받은 최근 문자를 숨김 메시지에 넣는다.
   //  메시지 탭에서 보낸 · 받은 문자는 바로 넣고(호출 없음), 지금 RP 방의 콘보가 답장을 끝냈을 때 · 창을 열 때 · 탭으로 돌아올 때 ·
   //  채팅 입력칸에 새 메시지를 쓰기 시작할 때만 콘보 최근 메시지 8개를 GET 1번(4초에 1번까지). 바뀐 게 있을 때만 숨김 메시지 · 저장.
-  const VERSION = "1.7.4";
+  const VERSION = "1.8.0";
   const DATA_KEY = "jumeoniV1";
   const POS_KEY = "marinara.jumeoni.fab.v1";
   const PENDING_KEY = "marinara.jumeoni.pending.v1";
@@ -555,7 +555,7 @@
   }
 
   // ── 돈 흐름 표시 ──
-  // [송금: 레오 → 미아 3만 | 저녁값] · ［입금：레오 2,400실링｜월급］ · [출금 나 2천5백] 등.
+  // [송금: 레오 → 미아 3만 | 저녁값] · ［입금：레오 2,400골드｜월급］ · [출금 나 2천5백] 등.
   const MONEY_SRC = `[\\[［]${MARK_SP}(송금|입금|출금)${MARK_SP}[:：]?${MARK_SP}([^\\]］\\n]{1,200}?)${MARK_SP}[\\]］]`;
   const moneyRe = () => new RegExp(MONEY_SRC, "g");
   const anyMarkRe = () => new RegExp(`${MARK_SRC}|${MONEY_SRC}`, "g");
@@ -576,7 +576,7 @@
     }
     return any && Number.isFinite(total) ? Math.round(total) : 0;
   }
-  /** "레오 2,400실링" → { name: "레오", amount: 2400 }. 금액은 끝에 있는 숫자 묶음(뒤의 화폐 이름 등은 버림). */
+  /** "레오 2,400골드" → { name: "레오", amount: 2400 }. 금액은 끝에 있는 숫자 묶음(뒤의 화폐 이름 등은 버림). */
   function nameAmount(s) {
     const m = String(s).match(/^(.*?)\s*((?:\d[\d,.]*\s*[억만천백]?\s*)+)([^\d]{0,24})$/);
     if (!m) return { name: unquote(s), amount: 0 };
@@ -669,7 +669,7 @@
   const state = {
     activeId: "", viewId: "", open: false, menuOpen: false, tab: "wallet", busy: "", status: "", statusAt: 0,
     rooms: new Map(), chatList: null,
-    filter: "all", wact: null, shopId: "", buy: null, questForm: false, editShopId: "", confirm: null, setup: null, salary: null,
+    filter: "all", wact: null, wmenu: false, shopId: "", buy: null, questForm: false, editShopId: "", confirm: null, setup: null, salary: null,
   };
   let draft = {};
   const dget = (k, def = "") => (k in draft ? draft[k] : def);
@@ -2687,6 +2687,24 @@
       switchEl(key, title, on, onFlip));
   }
   const numEl = (t, cls) => h("span", { class: `jmn-num${cls ? ` ${cls}` : ""}`, text: t });
+  /** 내역 금액: 작은 액정 창 + ▲(들어옴)/▼(나감). 뒤에 꺼진 8 칸을 깔아요. */
+  function lcdNum(n, cls) {
+    const t = fmt(Math.abs(n)), dir = n > 0 ? "▲" : n < 0 ? "▼" : "";
+    return h("span", { class: `jmn-num jmn-lcd${cls ? ` ${cls}` : ""}` },
+      h("span", { class: "jmn-sr", text: `${n > 0 ? "입금 " : n < 0 ? "출금 " : ""}${t}` }),
+      dir ? h("i", { class: "jmn-lcd-arrow", "aria-hidden": "true", text: dir }) : null,
+      h("span", { class: "jmn-lcd-v", "data-g": t.replace(/\d/g, "8"), "aria-hidden": "true" }, h("span", { text: t })));
+  }
+  /** 접었다 펴는 칸. 열림이 바뀐 직후면 옛 상태에서 새 상태로 부드럽게 움직여요. */
+  const foldSeen = new Map();
+  function fold(key, open, child, cls) {
+    const prev = foldSeen.get(key);
+    foldSeen.set(key, open);
+    const c = (v) => `jmn-fold${cls ? ` ${cls}` : ""}${v ? " jmn-on" : ""}`;
+    const box = h("div", { class: c(open), "aria-hidden": open ? null : "true" }, h("div", { class: "jmn-fold-in" }, child));
+    if (prev != null && prev !== open && !calm()) { box.className = c(prev); afterPaint(() => { void box.offsetWidth; box.className = c(open); }); }
+    return box;
+  }
   const chip = (t, go) => h("span", { class: `jmn-chip${go ? " jmn-chip-go" : ""}`, text: t });
   function section(title, sub) { return h("div", { class: "jmn-sec" }, h("b", { text: title }), sub ? h("span", { text: sub }) : null); }
   function inp(key, props = {}) {
@@ -2790,7 +2808,7 @@
     // 상점의 ‘NEW’ 표시는 상점 탭을 떠나면 지운다. 가방의 ‘도착’ 카드는 가방 탭을 떠나면 지운다.
     if (state.tab === "shop" && id !== "shop") newItems.clear();
     if (state.tab === "bag" && id !== "bag") arrived.clear();
-    state.tab = id; state.wact = null; state.buy = null; state.questForm = false; state.confirm = null; sec.form = null; sec.confirmDel = ""; setStatus(""); render();
+    state.tab = id; state.wact = null; state.wmenu = false; state.buy = null; state.questForm = false; state.confirm = null; sec.form = null; sec.confirmDel = ""; setStatus(""); render();
   }
   function body(room) {
     trackDeliveries(room);
@@ -2860,7 +2878,7 @@
     h("b", { text: item ? "비밀 고치기" : "새 비밀" }),
     field("제목", inp("ps.title", { placeholder: "비밀 제목" })),
     field("비밀 내용", ta("ps.text", { rows: "5", placeholder: "원본 비밀 설정" })),
-    field("드러나는 단서 (선택)", ta("ps.clue", { rows: "2", maxlength: String(CLUE_MAX), placeholder: "NPC가 볼 수 있는 흔적. 예: 가끔 왼쪽 가슴을 무의식적으로 감싼다 / 여름에도 목까지 잠긴 셔츠만 입는다" })),
+    field("드러나는 단서 (선택)", ta("ps.clue", { rows: "2", maxlength: String(CLUE_MAX), placeholder: "NPC가 볼 수 있는 흔적. 예: 비 오는 날이면 왼손을 주머니에 숨긴다 / 낡은 회중시계를 자주 들여다본다" })),
     hint("복선 상태일 때만 AI에게 전달돼요."),
     h("div", { class: "jmn-actions" },
       btn(sec.busy ? "저장하는 중…" : "저장", null, { submit: true, disabled: sec.busy }),
@@ -2957,18 +2975,43 @@
     }
     if (d.pack.statName) bals.append(h("div", { class: "jmn-bal jmn-bal-stat jmn-glass" }, h("small", { text: d.pack.statName }), countNum(`${room.id}:stat`, d.stat)));
     left.append(bals);
-    const act = (id, label) => btn(label, () => { state.wact = state.wact === id ? null : id; setStatus(""); render(); }, { ghost: state.wact !== id, disabled: (id === "send" || id === "recv") && !npcs.length });
-    left.append(h("div", { class: "jmn-actions" }, act("send", "송금"), act("recv", "NPC에게 받기"), act("in", "직접 입금"), act("out", "직접 출금")));
-    if (state.wact) {
-      const mode = state.wact, withNpc = mode === "send" || mode === "recv";
+    // 거래하기: 버튼 하나 → 목록이 펼쳐지고, 고르면 목록이 접히며 폼이 열린다.
+    const WACTS = [
+      ["send", "↗", "송금", "내 통장 → NPC 통장"],
+      ["recv", "↙", "NPC에게 받기", "NPC 통장 → 내 통장"],
+      ["in", "+", "직접 입금", "잔고를 맞출 때 쓰는 수정용"],
+      ["out", "−", "직접 출금", "잔고를 맞출 때 쓰는 수정용"],
+    ];
+    const cur = WACTS.find((x) => x[0] === state.wact);
+    const menuOn = !!state.wmenu && !cur;
+    const trig = h("button", { class: `jmn-wtrig${menuOn || cur ? " jmn-on" : ""}`, type: "button", "aria-expanded": String(menuOn), "aria-controls": "jmn-wmenu", onclick: () => {
+      if (cur) { state.wact = null; state.wmenu = true; } else state.wmenu = !state.wmenu;
+      setStatus(""); render();
+    } },
+    h("span", { class: "jmn-wtrig-l" }, h("i", { class: "jmn-wtrig-ic", "aria-hidden": "true", text: cur ? cur[1] : "⇄" }), h("span", { text: cur ? cur[2] : "거래하기" })),
+    h("i", { class: "jmn-wtrig-chev", "aria-hidden": "true", text: "▾" }));
+    const items = WACTS.map(([id, ic, label, sub], i) => {
+      const off = (id === "send" || id === "recv") && !npcs.length;
+      const b = h("button", { class: "jmn-witem", type: "button", disabled: off, tabindex: menuOn ? null : "-1", onclick: () => { state.wmenu = false; state.wact = id; setStatus(""); render(); } },
+        h("span", { class: "jmn-witem-ic", "aria-hidden": "true", text: ic }),
+        h("span", { class: "jmn-witem-t" }, h("span", { text: label }), h("small", { text: off ? "NPC 통장이 있어야 해요" : sub })));
+      if (b.style) b.style.setProperty("--i", String(i));
+      return b;
+    });
+    left.append(h("div", { class: "jmn-wact" }, trig,
+      fold(`wmenu:${room.id}`, menuOn, h("div", { class: "jmn-wlist jmn-glass", id: "jmn-wmenu" }, items), "jmn-wfold-menu")));
+    let form = null;
+    if (cur) {
+      const mode = cur[0], withNpc = mode === "send" || mode === "recv";
       const title = { send: "내 통장 → NPC 통장", recv: "NPC 통장 → 내 통장", in: "내 통장에 직접 입금 (수정용)", out: "내 통장에서 직접 출금 (수정용)" }[mode];
-      left.append(h("form", { class: "jmn-form", onsubmit: (e) => { e.preventDefault(); doWallet(room, mode); } },
+      form = h("form", { class: "jmn-form jmn-glass", onsubmit: (e) => { e.preventDefault(); doWallet(room, mode); } },
         h("b", { text: title }),
         withNpc ? field(mode === "send" ? "받는 사람" : "주는 사람", sel("w.npc", npcs.map((w) => [w.id, `${w.name} (${fmt(w.balance)})`]), npcs[0]?.id)) : null,
         field(`금액 (${d.pack.currency})`, inp("w.amt", { inputmode: "numeric", placeholder: "0" })),
         field("메모", inp("w.memo", { maxlength: "60", placeholder: withNpc ? "선택" : "예: 잔고 맞추기" })),
-        h("div", { class: "jmn-actions" }, btn("확인", null, { submit: true }), btn("취소", () => { state.wact = null; render(); }, { ghost: true }))));
+        h("div", { class: "jmn-actions" }, btn("확인", null, { submit: true }), btn("취소", () => { state.wact = null; state.wmenu = false; render(); }, { ghost: true })));
     }
+    left.append(fold(`wform:${room.id}`, !!cur, form, "jmn-wfold-form"));
     const right = h("div", { class: "jmn-col jmn-glass jmn-ledger" });
     const FILTERS = [["all", "전체"], ["in", "입금"], ["out", "출금"]];
     right.append(h("div", { class: "jmn-sec" }, h("b", { text: "내역" }),
@@ -2981,7 +3024,7 @@
       const mine = e.walletId === pc.id;
       const owner = mine ? "" : (d.wallets.find((w) => w.id === e.walletId)?.name || "NPC");
       right.append(rowIn(row(e.title, [e.sub, owner ? `${owner} 통장` : "", e.rp ? `작중 ${e.rp}` : fmtTime(e.ts)].filter(Boolean).join(" · "),
-        numEl(signed(e.amount), !mine ? "jmn-mute" : e.amount > 0 ? "jmn-plus" : e.amount < 0 ? "jmn-minus" : ""),
+        lcdNum(e.amount, !mine ? "jmn-mute" : e.amount > 0 ? "jmn-plus" : e.amount < 0 ? "jmn-minus" : ""),
         e.k === "auto" ? h("button", { class: "jmn-btn jmn-ghost jmn-undo", type: "button", text: "되돌리기", "aria-label": `${e.title} 자동 반영 되돌리기`, onclick: () => undoAuto(room, e) }) : null), rk, e.id));
     }
     return h("div", { class: "jmn-body jmn-cols jmn-wallet" }, left, right);
@@ -2990,7 +3033,7 @@
     const d = room.data, pc = pcWallet(d);
     const amt = num(dget("w.amt")), memo = str(dget("w.memo"), 60);
     if (amt < 1) return fail("금액을 1 이상의 숫자로 적어 주세요.");
-    const done = (fn, msg) => { delete draft["w.amt"]; delete draft["w.memo"]; state.wact = null; edit(room, fn, msg); };
+    const done = (fn, msg) => { delete draft["w.amt"]; delete draft["w.memo"]; state.wact = null; state.wmenu = false; edit(room, fn, msg); };
     if (mode === "send" || mode === "recv") {
       const npcs = npcWallets(d);
       const npc = npcs.find((w) => w.id === dget("w.npc")) || npcs[0];
@@ -3447,7 +3490,7 @@
 
   // ── 열기 · 닫기 · 방 고르기 ──
   function resetView() {
-    state.menuOpen = false; state.wact = null; state.buy = null; state.shopId = ""; state.questForm = false; state.editShopId = ""; state.confirm = null;
+    state.menuOpen = false; state.wact = null; state.wmenu = false; state.buy = null; state.shopId = ""; state.questForm = false; state.editShopId = ""; state.confirm = null;
     // AI를 부르는 중이면 창을 닫아도 결과를 버리지 않는다.
     if (!(state.setup && state.setup.phase === "calling")) state.setup = null;
     if (!(state.salary && state.salary.phase === "calling")) state.salary = null;
